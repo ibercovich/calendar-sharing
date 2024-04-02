@@ -1,53 +1,56 @@
 function sync() {
 
-  // CHANGE - id of the secondary calendar to pull events from
-  // if the calendar you are sharing is not your primary under another account
-  // then the ID will be something like something@group.calendar.google.com
-  var id="your_personal_email@gmail.com"; 
-      
-  var secondaryCal=CalendarApp.getCalendarById(id);
-  var today=new Date();
-  var enddate=new Date();
-  enddate.setDate(today.getDate()+30); // how many days in advance to monitor and block off time
-  var secondaryEvents=secondaryCal.getEvents(today,enddate);
-
-  var primaryCal=CalendarApp.getDefaultCalendar();
-  
-  var primaryEvents=primaryCal.getEvents(today,enddate);
-  
-  var stat=1;
-  var evi, existingEvents;
- 
-  for (ev in secondaryEvents)
-  {
-    stat=1;
-    evi=secondaryEvents[ev];
-    
-    for (existingEvents in primaryEvents) // if the secondary event has already been blocked in the primary calendar, ignore it
-      {
-        if ((primaryEvents[existingEvents].getStartTime().getTime()==evi.getStartTime().getTime()) && (primaryEvents[existingEvents].getEndTime().getTime()==evi.getEndTime().getTime()))
-        {
-           stat=0;
-           break;
-        }
-      }
-    
-    if (stat==0) continue;
-    
-    var d = evi.getStartTime();
-    var n = d.getDay();
-
-    if (evi.isAllDayEvent()) continue;
-    
-    if (n==1 || n==2 || n==3 || n==4 || n==5) // skip weekends. Delete this if you want to include weekends
-    {
-      var newEvent = primaryCal.createEvent('Booked',evi.getStartTime(),evi.getEndTime()); // change the Booked text to whatever you would like your merged event titles to be
-      // alternative version below that copies the exact secondary event information into the primary calendar event
-      // var newEvent = primaryCal.createEvent(evi.getTitle(),evi.getStartTime(),evi.getEndTime(), {location: evi.getLocation(), description: evi.getDescription()});  
-
-      newEvent.removeAllReminders(); // so you don't get double notifications. Delete this if you want to keep the default reminders for your newly created primary calendar events
-    }
-
+  function matchTimes(pev, evi) {
+    return pev.getStartTime().getTime() === evi.getStartTime().getTime() && pev.getEndTime().getTime() === evi.getEndTime().getTime();
   }
+
+  var id = "your_email@gmail.com"; // CHANGE - id of the secondary calendar
+  var secondaryCal = CalendarApp.getCalendarById(id);
+  var today = new Date();
+  var enddate = new Date();
+  enddate.setDate(today.getDate() + 30); // how many days in advance
+  var secondaryEvents = secondaryCal.getEvents(today, enddate);
+  var primaryCal = CalendarApp.getDefaultCalendar();
+  var primaryEvents = primaryCal.getEvents(today, enddate);
+
+  var bookedEventsToVerify = primaryEvents.filter(
+    // get existing events titled "Booked" previously created
+    // this is so that we can remove events if they were removed from secondary calendar
+    event => event.getTitle() === 'Booked').map(event => event.getId()
+    );
+
+
+  secondaryEvents.forEach(function (evi) {
+    // checks if an event already exists in primary calendar
+    // right now being done solely on start/end time
+    // could be improved by checking title if there are bugs
+    // if there is a match, store the event id
+    var matchedEventId = null;
+    var eventExists = primaryEvents.some(function (pev) {
+      var isMatch = matchTimes(pev, evi);
+      if (isMatch) {
+        matchedEventId = pev.getId(); // Capture the ID here
+      }
+      return isMatch;
+    });
+
+    // if the event doesn't exist in primary AND
+    // AND the event is _not_ all-day AND the event is on a weekday
+    // Then create an event called "Booked" with the same time
+    if (!eventExists && !evi.isAllDayEvent() && [1, 2, 3, 4, 5].includes(evi.getStartTime().getDay())) {
+      primaryCal.createEvent('Booked', evi.getStartTime(), evi.getEndTime()).removeAllReminders();
+    } else if (eventExists && matchedEventId) {
+      // if the event already exists, remove it from bookedEventsToVerify
+      bookedEventsToVerify = bookedEventsToVerify.filter(id => id !== matchedEventId);
+    }
+  });
+
+  bookedEventsToVerify.forEach(function (eventId) {
+    // all events that already existed were removed from bookedEventsToVerify
+    // all other Booked events are either newly added or no longer valid
+    // those that remain in the bookedEventsToVerify list are deprecated
+    var eventToDelete = primaryCal.getEventById(eventId);
+    if (eventToDelete) eventToDelete.deleteEvent();
+  });
 
 }
